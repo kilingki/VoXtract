@@ -27,6 +27,7 @@
 - 근거·버전·실제 요청/응답 형태·오류·취소 의미·미검증 항목: [연동 계약 기록](integration-contracts.md).
 - 확인한 계약을 반영한 준비·ASR·FA 경계와 재시작 시 보류 설계: [아키텍처](architecture.md).
 - 지원 형식·크기·시간·보존·삭제·용량·재시도·내보내기 추천안과 결정 상태: [결정 기록](decisions.md#1단계-조사-결과와-정책-결정).
+- 사용자 피드백 반영: 입력 길이 상한 2시간과 threshold를 넘는 입력의 분할 처리 방향을 기록했다. 30분 threshold는 후보이며 바이트 한도는 재검토 대상이다. 분할 경계·시간 복원·구간별 복구는 아키텍처의 설계안이며 아직 구현·실제 추론 검증하지 않았다. 나머지 정책은 결정 대기다.
 - InferSwap 상태 GET과 ASR·FA control/status GET은 각 3초 제한에서 시간 초과. ASR·FA 컨테이너는 중지 상태였으며 시작하지 않았다. 실제 서비스 버전·추론·갤럭시 품질은 미검증이다.
 - 검증: WSL Ubuntu / Python 3.12.3에서 `uv run --locked python -m unittest discover -s tests -v`의 HTTP 스모크 검사 3개 통과, `uv run --locked python -m compileall -q backend tests` 통과. 비로그인 WSL PATH에서 uv를 찾지 못한 최초 실행 뒤 `/home/kjh/.local/bin/uv`로 재실행했다. 외부 저장소 테스트·GPU 추론은 실행하지 않았다.
 - 문서 검증: 로컬 링크 16개·JSON 예제 2개 검사와 `git diff --check` 통과. 근거 소스와 문서의 요청 필드·sample 범위·시간 기준·실패 의미를 대조했다.
