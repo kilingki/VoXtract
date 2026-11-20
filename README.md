@@ -1,8 +1,8 @@
 # VoXtract
 
-갤럭시 음성 녹음을 로컬 PC에 업로드하여 Qwen ASR 전사와 Qwen FA 단어 정렬을 순차 수행하는 개인용 웹 애플리케이션이다. 기존 InferSwap과 추론 런타임은 별도 저장소·프로세스로 유지한다.
+음성·미디어 입력을 로컬 PC에서 전사하고 단어별 시간을 정렬하는 개인용 웹 애플리케이션이다. 초기 MVP는 갤럭시 녹음 업로드와 Qwen ASR → Qwen FA로 시작한다. 이후 다른 오디오·MP4 등 동영상 파일, YouTube 링크 입력, 작업별 ASR 런타임 선택으로 확장한다. 기존 InferSwap과 추론 런타임은 별도 저장소·프로세스로 유지한다.
 
-현재는 **실행 가능한 초기 골격**이다. 안내 화면, 앱 상태 확인, HTTP 스모크 검사만 제공한다. 업로드·작업 관리·ASR/FA·결과·내보내기·PWA·Tailscale은 미구현이다. 상태 확인 성공은 추론 서비스 준비 상태를 뜻하지 않는다.
+현재는 **실행 가능한 초기 골격**이다. 안내 화면, 앱 상태 확인, HTTP 스모크 검사만 제공한다. 업로드·작업 관리·ASR/FA·결과·내보내기·PWA·Tailscale·미디어/링크 입력·런타임 선택은 미구현이다. 상태 확인 성공은 추론 서비스 준비 상태를 뜻하지 않는다.
 
 ## 구조
 
@@ -66,6 +66,7 @@ uv run --locked python -m compileall -q backend tests
 - [아키텍처](docs/architecture.md): 책임·흐름·실패와 복구
 - [로드맵](docs/roadmap.md): 구현 순서와 완료 조건
 - [결정 기록](docs/decisions.md): 기술 선택과 미결정 항목
+- [연동 계약 기록](docs/integration-contracts.md): 1단계에서 조사한 InferSwap·ASR·FA 계약, 근거 버전과 미검증 항목
 - [개발 규칙](AGENTS.md): 사람과 AI Agent의 작업 기준
 
 ## 라이선스
