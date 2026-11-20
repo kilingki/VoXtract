@@ -1,0 +1,12 @@
+[project]
+name = "voxtract"
+version = "0.1.0"
+description = "Local-first voice transcription application scaffold"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "kilingki"}]
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1"]
+
+[tool.uv]
+package = false
