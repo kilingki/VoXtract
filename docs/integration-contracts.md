@@ -60,7 +60,7 @@ VoXtract가 사용할 요청은 InferSwap의 `model=qwen-asr`에 대한 multipar
 | `model` | served name `qwen3-asr` (조사한 로컬 설정 기준) |
 | `response_format` | `verbose_json` |
 | `include_chunks` | `true`. 이 확장 필드를 사용해야 FA 입력에 필요한 audio·chunks를 받음 |
-| `language` | 초기 추천값 `ko`; 실제 채택은 정책 결정 기록 참조 |
+| `language` | 초기 채택값 `ko`; 정책 결정 기록 참조 |
 | 기타 | segment granularity는 기본값. `word` 요청은 400. prompt는 내부 서버로 전달되지만 MVP에서 사용자 입력으로 제공하지 않음. temperature는 수용 후 무시 |
 
 `include_chunks=true`는 이미 canonical WAV인 입력만 허용하며 런타임이 변환하지 않는다. 최소 한 frame이 필요하다. 다른 형식이나 verbose_json 외 응답 형식과의 조합은 400이다. 필수 form 누락·형식 오류는 FastAPI 기본 검증의 422가 될 수 있다. 모델이 준비되지 않으면 503, 처리 예외는 500(`detail`)이다.
