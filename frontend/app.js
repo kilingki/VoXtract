@@ -107,6 +107,15 @@ function renderJob(job, inferenceEnabled, inferenceHeld) {
     actions.append(run);
   }
 
+  if (job.status === "completed") {
+    const result = document.createElement("a");
+    result.className = "result-link";
+    result.href = `/jobs/${job.id}`;
+    result.textContent = "결과 보기";
+    result.setAttribute("aria-label", `${job.name} ${result.textContent}`);
+    actions.append(result);
+  }
+
   if (active || job.run_requested || job.external_pending) {
     item.append(actions);
     return item;
@@ -154,7 +163,7 @@ async function loadJobs() {
         job, data.inference_enabled, data.inference_held,
       )));
       if (focusLabel) {
-        const restored = Array.from(jobs.querySelectorAll("button")).find(
+        const restored = Array.from(jobs.querySelectorAll("button, a")).find(
           (button) => button.getAttribute("aria-label") === focusLabel,
         );
         (restored || refreshButton).focus();

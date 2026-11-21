@@ -44,3 +44,12 @@ progress { max-width: 100%; margin-left: .5rem; }
 #jobs strong { overflow-wrap: anywhere; }
 #jobs p { margin: .15rem 0; color: #34527a; }
 .job-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.downloads a, .result-link {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  padding: .35rem .85rem;
+  border-radius: .45rem;
+  background: #23476e;
+  color: white;
+}

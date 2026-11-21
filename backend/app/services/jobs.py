@@ -3,13 +3,14 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterable
-from pathlib import PurePath
+from os import stat_result
+from pathlib import Path, PurePath
 from uuid import uuid4
 
 from starlette.concurrency import run_in_threadpool
 
 from backend.app.services.audio import InvalidAudio, validate_audio
-from backend.app.storage.jobs import JobStore
+from backend.app.storage.jobs import JobStore, RecordingResult
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,14 @@ class Jobs:
     async def get(self, job_id: str) -> dict:
         async with self.queue_lock:
             return await run_in_threadpool(self.store.get, job_id)
+
+    async def result(self, job_id: str) -> RecordingResult:
+        async with self.queue_lock:
+            return await run_in_threadpool(self.store.get_result, job_id)
+
+    async def audio(self, job_id: str) -> tuple[Path, str, stat_result]:
+        async with self.queue_lock:
+            return await run_in_threadpool(self.store.original_audio, job_id)
 
     async def delete(self, job_id: str) -> None:
         async with self.queue_lock:

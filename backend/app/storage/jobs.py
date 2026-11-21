@@ -9,6 +9,7 @@ import struct
 import wave
 from collections.abc import AsyncIterable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
@@ -62,6 +63,16 @@ class JobNotFound(Exception):
 
 class JobNotDeletable(Exception):
     pass
+
+
+class JobResultUnavailable(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class RecordingResult:
+    job: dict
+    result: dict
 
 
 class JobStore:
@@ -245,6 +256,25 @@ class JobStore:
                 return json.load(file)
         except FileNotFoundError as exc:
             raise JobNotFound from exc
+
+    def completed_job(self, job_id: str) -> dict:
+        job = self.get(job_id)
+        if job["status"] != "completed":
+            raise JobResultUnavailable
+        return job
+
+    def get_result(self, job_id: str) -> RecordingResult:
+        job = self.completed_job(job_id)
+        path = self.jobs_dir / job_id / "inference" / "result.json"
+        with path.open(encoding="utf-8") as file:
+            result = json.load(file)
+        return RecordingResult(job, result)
+
+    def original_audio(self, job_id: str) -> tuple[Path, str, os.stat_result]:
+        job = self.completed_job(job_id)
+        audio = self.jobs_dir / job_id / "original"
+        media_type = {".m4a": "audio/mp4", ".wav": "audio/wav"}[Path(job["name"]).suffix.lower()]
+        return audio, media_type, audio.stat()
 
     def publish(
         self, directory: Path, job_id: str, name: str, size: int, seconds: float

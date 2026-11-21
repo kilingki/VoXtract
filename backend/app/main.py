@@ -5,12 +5,13 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect
 
 from backend.app.services.audio import AudioTooLong, InvalidAudio, MediaToolUnavailable
@@ -18,7 +19,8 @@ from backend.app.services.inference import (
     InferenceUnavailable, JobNotHeld, JobNotRunnable, Runner, public_job,
 )
 from backend.app.services.jobs import Jobs, UploadBusy
-from backend.app.storage.jobs import JobNotDeletable, JobNotFound, JobStore
+from backend.app.services.results import EXPORT_MEDIA_TYPES, ExportFormat, export_result, render_reader
+from backend.app.storage.jobs import JobNotDeletable, JobNotFound, JobResultUnavailable, JobStore
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = ROOT_DIR / "frontend"
@@ -31,6 +33,7 @@ JOB_ERRORS = {
     UploadBusy: (409, "upload_busy"),
     JobNotFound: (404, "job_not_found"),
     JobNotDeletable: (409, "job_not_deletable"),
+    JobResultUnavailable: (409, "job_result_unavailable"),
     JobNotRunnable: (409, "job_not_runnable"),
     JobNotHeld: (409, "job_not_held"),
     InferenceUnavailable: (503, "inference_unavailable"),
@@ -66,6 +69,9 @@ def create_app(data_dir: Path = ROOT_DIR / "data") -> FastAPI:
             async with app.state.runner.open():
                 yield
 
+    offline_css = "\n".join(
+        (FRONTEND_DIR / name).read_text(encoding="utf-8") for name in ("styles.css", "reader.css")
+    )
     app = FastAPI(title="VoXtract", version="0.1.0", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
     for error_type in (*JOB_ERRORS, OSError):
@@ -113,6 +119,34 @@ def create_app(data_dir: Path = ROOT_DIR / "data") -> FastAPI:
     async def get_job(request: Request, job_id: str) -> JSONResponse:
         job = await request.app.state.jobs.get(job_id)
         return JSONResponse(public_job(job), headers=PRIVATE_HEADERS)
+
+    @app.get("/jobs/{job_id}", response_class=HTMLResponse)
+    async def read_transcript(request: Request, job_id: str) -> HTMLResponse:
+        recording = await request.app.state.jobs.result(job_id)
+        html = await run_in_threadpool(render_reader, recording)
+        return HTMLResponse(html, headers=PRIVATE_HEADERS)
+
+    @app.head("/api/jobs/{job_id}/audio", include_in_schema=False)
+    @app.get("/api/jobs/{job_id}/audio", response_class=FileResponse)
+    async def get_audio(request: Request, job_id: str) -> FileResponse:
+        path, media_type, stat = await request.app.state.jobs.audio(job_id)
+        return FileResponse(path, media_type=media_type, stat_result=stat, headers=PRIVATE_HEADERS)
+
+    @app.get("/api/jobs/{job_id}/export/{extension}")
+    async def download_result(request: Request, job_id: str, extension: ExportFormat) -> Response:
+        recording = await request.app.state.jobs.result(job_id)
+        name = quote(f"{Path(recording.job['name']).stem}.{extension}", safe="")
+        css = offline_css if extension == "html" else ""
+        content = await run_in_threadpool(export_result, recording, extension, css=css)
+        return Response(
+            content,
+            media_type=EXPORT_MEDIA_TYPES[extension],
+            headers={
+                **PRIVATE_HEADERS,
+                "Content-Disposition": f"attachment; filename=voxtract.{extension}; filename*=UTF-8''{name}",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @app.post("/api/jobs/{job_id}/run", status_code=202)
     async def run_job(request: Request, job_id: str) -> JSONResponse:

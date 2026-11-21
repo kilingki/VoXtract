@@ -22,6 +22,7 @@ from urllib.request import Request, urlopen
 
 from backend.app.integrations.inferswap import ContractError, parse_asr, parse_fa
 from backend.app.services.preparation import merge_items, partitions
+from backend.app.services.results import render_segments
 from backend.app.storage.jobs import JobStore
 from test_jobs import recording, upload
 from test_scaffold import http_server
@@ -173,6 +174,7 @@ class InferenceTests(unittest.TestCase):
         with http_server(self.root) as url:
             self.assertEqual(call(self.job_url(url, job))[1]["status"], "queued")
             self.assertEqual(self.fake.calls, [])
+            self.assert_code(409, self.job_url(url, job) + "/export/html", method="GET")
             self.run_job(url, job)
             result = self.wait(url, job, "completed")
             self.assertNotIn("inference_settings", result)
@@ -189,6 +191,38 @@ class InferenceTests(unittest.TestCase):
         self.assertEqual(private["items"][0]["text"], "테스트")
         self.assertEqual(private["time_reference"], "canonical_audio_start")
         self.assertEqual(private["num_samples"], round(job["duration_seconds"] * 16000))
+
+        with patch.dict(os.environ, {"VOXTRACT_INFERSWAP_URL": ""}), http_server(self.root) as url:
+            reader = f"{url}/jobs/{job['id']}"
+            resource = self.job_url(url, job)
+            with urlopen(reader, timeout=3) as response:
+                self.assertIn("no-store", response.headers["Cache-Control"])
+                self.assertIn('<button type="button" class="seek"', response.read().decode())
+            with urlopen(resource + "/export/html", timeout=3) as response:
+                html = response.read().decode()
+                self.assertIn("attachment;", response.headers["Content-Disposition"])
+                self.assertIn("<style>", html)
+                self.assertIn('<span class="seek">00:00</span>', html)
+                self.assertNotIn("<script", html)
+                self.assertNotIn("/static/", html)
+                self.assertNotIn("<audio", html)
+            with urlopen(resource + "/export/txt", timeout=3) as response:
+                self.assertEqual(response.read().decode("utf-8"), private["text"])
+            with urlopen(resource + "/export/json", timeout=3) as response:
+                exported = json.load(response)
+                self.assertEqual(exported["schema_version"], 1)
+                self.assertEqual(exported["items"], private["items"])
+                self.assertNotIn("plan", exported)
+            request = Request(resource + "/audio", headers={"Range": "bytes=4-11"})
+            with urlopen(request, timeout=3) as response:
+                self.assertEqual(response.status, 206)
+                self.assertEqual(response.headers["Content-Type"], "audio/mp4")
+                self.assertEqual(response.headers["Cache-Control"], "no-store")
+                self.assertEqual(response.read(), media.read_bytes()[4:12])
+            self.assertEqual(call(resource, method="DELETE")[0], 204)
+            for endpoint in (reader, resource + "/audio", resource + "/export/json"):
+                self.assert_code(404, endpoint, method="GET")
+            self.assertFalse(self.path(job).parent.exists())
 
     def test_split_order_wave_identity_and_absolute_offsets(self):
         with patch.dict(os.environ, {"VOXTRACT_SPLIT_SECONDS": "1"}):
@@ -216,6 +250,8 @@ class InferenceTests(unittest.TestCase):
             self.assertFalse(failed["external_pending"])
             self.assertEqual(failed["error"]["stage"], "aligning")
             self.assertFalse((self.path(job) / "result.json").exists())
+            self.assert_code(409, f"{url}/jobs/{job['id']}", method="GET")
+            self.assert_code(409, self.job_url(url, job) + "/export/json", method="GET")
         self.fake.behavior = None
         with http_server(self.root) as url:
             self.run_job(url, job)
@@ -353,6 +389,22 @@ class InferenceTests(unittest.TestCase):
 
 
 class AlignmentTests(unittest.TestCase):
+    def test_zero_length_items_keep_text_without_seek_or_highlight(self):
+        result = {
+            "empty_transcript": False,
+            "items": [
+                {"start": 0, "end": 0, "text": "<script>"},
+                {"start": 3, "end": 3, "text": "untimed"},
+                {"start": 4, "end": 5, "text": "timed"},
+            ],
+        }
+        html = render_segments(result, interactive=True)
+        self.assertIn("<span>&lt;script&gt;</span>", html)
+        self.assertNotIn('data-start="0"', html)
+        self.assertNotIn('data-start="3"', html)
+        self.assertIn('<div class="segment" data-start="4" data-end="5">', html)
+        self.assertEqual(html.count('<button type="button" class="seek"'), 1)
+
     def test_partition_boundaries_and_core_coverage(self):
         threshold = 1800 * 16000
         for frames, count in [(threshold - 1, 1), (threshold, 1), (threshold + 1, 2), (4 * threshold, 4)]:
