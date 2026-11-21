@@ -9,7 +9,6 @@ body { margin: 0; }
 main { max-width: 44rem; margin: 0 auto; padding: 3rem 1.25rem; }
 h1 { font-size: clamp(2rem, 8vw, 3rem); margin: 0 0 1rem; }
 h2 { font-size: 1.2rem; }
-.eyebrow { color: #34527a; }
 section {
   background: white;
   border: 1px solid #d5dfeb;
@@ -17,4 +16,30 @@ section {
   padding: 1.25rem;
   margin-top: 2rem;
 }
-#health { font-weight: 600; }
+label { display: block; font-weight: 600; margin-bottom: .35rem; }
+input[type="file"] { display: block; max-width: 100%; font: inherit; }
+button {
+  min-height: 2.75rem;
+  padding: .35rem .85rem;
+  border: 1px solid #8498b4;
+  border-radius: .45rem;
+  color: #172437;
+  background: white;
+  font: inherit;
+  cursor: pointer;
+}
+#upload-button { color: white; background: #23476e; }
+button:disabled { opacity: .65; cursor: default; }
+:focus-visible { outline: 2px solid #1666b1; outline-offset: 3px; }
+progress { max-width: 100%; margin-left: .5rem; }
+.queue-heading, #jobs li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1rem;
+  justify-content: space-between;
+  align-items: center;
+}
+#jobs { list-style: none; margin: 0; padding: 0; }
+#jobs li { border-top: 1px solid #d5dfeb; padding: .75rem 0; }
+#jobs strong { overflow-wrap: anywhere; }
+#jobs p { margin: .15rem 0; color: #34527a; }

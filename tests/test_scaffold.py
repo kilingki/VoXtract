@@ -5,41 +5,46 @@ import socket
 import threading
 import time
 import unittest
+from contextlib import contextmanager
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
 import uvicorn
 
-from backend.app.main import app
+from backend.app.main import create_app
+
+
+@contextmanager
+def http_server(data_dir: Path):
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        base_url = f"http://127.0.0.1:{sock.getsockname()[1]}"
+        server = uvicorn.Server(uvicorn.Config(create_app(data_dir), log_level="error"))
+        thread = threading.Thread(
+            target=server.run, kwargs={"sockets": [sock]}, daemon=True
+        )
+        thread.start()
+        deadline = time.monotonic() + 5
+        try:
+            while not server.started:
+                if not thread.is_alive() or time.monotonic() >= deadline:
+                    raise RuntimeError("Test server did not start")
+                time.sleep(0.01)
+            yield base_url
+        finally:
+            server.should_exit = True
+            thread.join(timeout=5)
+            if thread.is_alive():
+                raise RuntimeError("Test server did not stop")
 
 
 class ScaffoldTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sock = socket.socket()
-        cls.sock.bind(("127.0.0.1", 0))
-        cls.base_url = f"http://127.0.0.1:{cls.sock.getsockname()[1]}"
-        cls.server = uvicorn.Server(uvicorn.Config(app, log_level="error"))
-        cls.thread = threading.Thread(
-            target=cls.server.run, kwargs={"sockets": [cls.sock]}, daemon=True
-        )
-        cls.thread.start()
-        deadline = time.monotonic() + 5
-        while not cls.server.started:
-            if not cls.thread.is_alive() or time.monotonic() >= deadline:
-                cls.server.should_exit = True
-                cls.thread.join(timeout=5)
-                cls.sock.close()
-                raise RuntimeError("Smoke-test server did not start")
-            time.sleep(0.01)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.server.should_exit = True
-        cls.thread.join(timeout=5)
-        cls.sock.close()
-        if cls.thread.is_alive():
-            raise RuntimeError("Smoke-test server did not stop")
+        root = cls.enterClassContext(TemporaryDirectory())
+        cls.base_url = cls.enterClassContext(http_server(Path(root)))
 
     def test_health(self) -> None:
         with urlopen(self.base_url + "/api/health", timeout=3) as response:
