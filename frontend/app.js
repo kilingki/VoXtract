@@ -43,7 +43,27 @@ function upload(file) {
   });
 }
 
-function renderJob(job) {
+const jobStates = {
+  queued: "대기",
+  preparing: "오디오 준비 중",
+  transcribing: "전사 중",
+  aligning: "단어 시간 정렬 중",
+  completed: "처리 완료",
+  failed: "처리 실패",
+  interrupted: "처리 중단",
+};
+const stageErrors = {
+  external_execution_unknown: "외부 실행 종료 확인 필요",
+  inference_unreachable: "InferSwap에 연결할 수 없음",
+  inference_rejected: "추론 요청 거절",
+  invalid_inference_response: "추론 응답 검증 실패",
+  media_tool_unavailable: "ffmpeg 설치 필요",
+  audio_preparation_failed: "오디오 준비 실패",
+  insufficient_storage: "디스크 여유 공간 부족",
+  storage_error: "결과 저장 오류",
+};
+
+function renderJob(job, inferenceEnabled, inferenceHeld) {
   const item = document.createElement("li");
   const info = document.createElement("div");
   const name = document.createElement("strong");
@@ -51,15 +71,52 @@ function renderJob(job) {
   const seconds = Math.ceil(job.duration_seconds);
   const time = `${Math.floor(seconds / 60)}분 ${seconds % 60}초`;
   name.textContent = job.name;
-  details.textContent = `대기 · ${time}`;
+  const terminal = ["completed", "failed", "interrupted"].includes(job.status);
+  const held = job.external_pending && terminal;
+  const active = ["preparing", "transcribing", "aligning"].includes(job.status);
+  const state = job.run_requested ? "실행 대기" : jobStates[job.status];
+  const segment = active && job.progress?.total > 1
+    ? ` ${job.progress.part}/${job.progress.total}` : "";
+  const issue = held ? stageErrors.external_execution_unknown : stageErrors[job.error?.code];
+  details.textContent = [state + segment, time, issue].filter(Boolean).join(" · ");
   info.append(name, details);
+  item.append(info);
 
+  const actions = document.createElement("div");
+  actions.className = "job-actions";
+  if (inferenceEnabled && !inferenceHeld && !job.run_requested && !held &&
+      ["queued", "failed", "interrupted"].includes(job.status)) {
+    const run = document.createElement("button");
+    run.type = "button";
+    run.textContent = job.status === "queued" ? "전사 시작" : "재시도";
+    run.setAttribute("aria-label", `${job.name} ${run.textContent}`);
+    run.addEventListener("click", async () => {
+      run.disabled = true;
+      try {
+        const response = await fetch(`/api/jobs/${job.id}/run`, {
+          method: "POST", headers: {"Content-Type": "application/json"}, body: "{}",
+        });
+        if (!response.ok) throw new Error();
+        await loadJobs();
+        refreshButton.focus();
+      } catch {
+        queueStatus.textContent = "실행 요청을 확인하지 못했습니다. 작업 목록을 새로고침해 주세요.";
+        run.disabled = false;
+      }
+    });
+    actions.append(run);
+  }
+
+  if (active || job.run_requested || job.external_pending) {
+    item.append(actions);
+    return item;
+  }
   const remove = document.createElement("button");
   remove.type = "button";
   remove.textContent = "삭제";
   remove.setAttribute("aria-label", `${job.name} 삭제`);
   remove.addEventListener("click", async () => {
-    if (!window.confirm(`"${job.name}" 원본과 대기 작업을 삭제할까요?`)) return;
+    if (!window.confirm(`"${job.name}" 원본과 관련 결과를 삭제할까요?`)) return;
     remove.disabled = true;
     try {
       const response = await fetch(`/api/jobs/${job.id}`, { method: "DELETE" });
@@ -71,11 +128,14 @@ function renderJob(job) {
       remove.disabled = false;
     }
   });
-  item.append(info, remove);
+  actions.append(remove);
+  item.append(actions);
   return item;
 }
 
 let listRequest;
+let listSnapshot;
+let observing = false;
 
 async function loadJobs() {
   listRequest?.abort();
@@ -86,8 +146,27 @@ async function loadJobs() {
     const response = await fetch("/api/jobs", { signal: controller.signal, cache: "no-store" });
     if (!response.ok) throw new Error();
     const data = await response.json();
-    jobs.replaceChildren(...data.jobs.map(renderJob));
-    queueStatus.textContent = data.jobs.length ? `대기 작업 ${data.jobs.length}개` : "대기 중인 작업이 없습니다.";
+    const snapshot = JSON.stringify(data);
+    if (snapshot !== listSnapshot) {
+      const focusLabel = jobs.contains(document.activeElement)
+        ? document.activeElement.getAttribute("aria-label") : null;
+      jobs.replaceChildren(...data.jobs.map((job) => renderJob(
+        job, data.inference_enabled, data.inference_held,
+      )));
+      if (focusLabel) {
+        const restored = Array.from(jobs.querySelectorAll("button")).find(
+          (button) => button.getAttribute("aria-label") === focusLabel,
+        );
+        (restored || refreshButton).focus();
+      }
+      listSnapshot = snapshot;
+    }
+    observing = data.inference_enabled;
+    const queueSummary = data.jobs.length ? `작업 ${data.jobs.length}개` : "저장된 작업이 없습니다.";
+    const message = data.inference_held ? "외부 실행 종료가 확인될 때까지 전사를 보류합니다."
+      : !data.inference_enabled ? "서버의 전사 실행기가 비활성 상태입니다." : "";
+    const status = [queueSummary, message].filter(Boolean).join(" · ");
+    if (queueStatus.textContent !== status) queueStatus.textContent = status;
   } catch (error) {
     if (error.name !== "AbortError") queueStatus.textContent = "작업 목록을 불러오지 못했습니다.";
   } finally {
@@ -120,4 +199,7 @@ form.addEventListener("submit", async (event) => {
 
 uploadButton.disabled = false;
 refreshButton.addEventListener("click", loadJobs);
+setInterval(() => {
+  if (observing && !document.hidden && !refreshButton.disabled) loadJobs();
+}, 2500);
 loadJobs();

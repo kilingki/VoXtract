@@ -2,7 +2,7 @@
 
 음성·미디어 입력을 로컬 PC에서 전사하고 단어별 시간을 정렬하는 개인용 웹 애플리케이션이다. 초기 MVP는 갤럭시 녹음 업로드와 Qwen ASR → Qwen FA로 시작한다. 이후 다른 오디오·MP4 등 동영상 파일, YouTube 링크 입력, 작업별 ASR 런타임 선택으로 확장한다. 기존 InferSwap과 추론 런타임은 별도 저장소·프로세스로 유지한다.
 
-현재는 **녹음 업로드 및 대기 작업 관리**를 제공한다. 접수된 작업은 앱을 재시작해도 유지되며 화면에서 삭제할 수 있다. ASR→FA 실행, 결과와 내보내기, 스마트폰 외부 접속은 후속 단계다.
+현재는 **녹음 업로드, 작업 관리, 선택한 작업의 순차 ASR→FA 실행**을 제공한다. 접수된 녹음은 앱을 재시작해도 유지된다. 전사 본문·단어 시간 화면과 다운로드는 4단계, 스마트폰 외부 접속은 5단계 범위다.
 
 ## 구조
 
@@ -10,9 +10,9 @@
 backend/app/
   main.py             # HTTP 앱, 정적 화면, 상태 및 작업 API
   __main__.py         # 단일 프로세스 실행
-  services/           # 업로드 조정·오디오 검증
-  integrations/       # 향후 검증된 InferSwap API 어댑터
-  storage/            # 비공개 파일 기반 대기 큐
+  services/           # 업로드·오디오 준비·순차 추론 조정
+  integrations/       # InferSwap HTTP 및 Qwen 계약 어댑터
+  storage/            # 비공개 파일 기반 작업과 결과 저장
 frontend/             # 빌드 없는 HTML/CSS/JavaScript
 data/                 # 비공개 녹음 원본과 작업 메타데이터 (Git 제외)
 tests/                # 실제 HTTP 및 저장·복구 검사
@@ -52,7 +52,17 @@ $env:VOXTRACT_PORT = "8000"
 uv run --locked python -m backend.app
 ```
 
-uv.lock은 재현 가능한 설치를 위해 보관한다. 의도적으로 의존성을 바꿀 때만 `uv lock`으로 갱신한다. 직접 의존성은 FastAPI와 Uvicorn 두 개다.
+uv.lock은 재현 가능한 설치를 위해 보관한다. FastAPI와 Uvicorn을 사용하며, InferSwap 연결의 취소와 응답 처리를 위해 Uvicorn이 이미 설치하는 h11을 직접 사용한다.
+
+### 저장된 녹음 전사
+
+InferSwap과 InferSwap에 등록된 ASR·FA 런타임을 준비한 뒤, VoXtract 서버를 실행한 WSL에서 실제 InferSwap 주소를 지정한다. 아래 주소는 조사한 로컬 설정 기준이다. 기존 VoXtract가 떠 있으면 종료하고 같은 프로젝트 루트에서 다시 실행한다.
+
+```sh
+VOXTRACT_INFERSWAP_URL=http://127.0.0.1:8095 uv run --locked python -m backend.app
+```
+
+작업 목록에서 원하는 녹음의 **전사 시작**을 누른다. 기존 M4A도 그대로 선택할 수 있다. 등록 모델 ID와 ASR served name이 다르면 [.env.example](.env.example)의 설정으로 지정한다. 작업 목록은 준비·전사·정렬·완료 상태를 표시한다. 검증된 내부 결과는 `data/jobs/<id>/inference/result.json`에 저장된다. 외부 실행 종료가 불명확해 보류된 경우에는 [복구 절차](docs/architecture.md#외부-실행-보류-해제)를 따른다.
 
 ## 검증
 
@@ -61,7 +71,7 @@ uv run --locked python -m unittest discover -s tests -v
 uv run --locked python -m compileall -q backend tests
 ```
 
-검사는 임시 저장소와 loopback HTTP 서버에서 진행한다. 생성한 WAV·M4A로 접수와 조회, 2시간 경계, 잘못된 입력, 중단·디스크 부족, 재시작 복구, 삭제, 데이터 경로 비공개를 검사한다. 실제 갤럭시에서 확인한 범위는 [로드맵](docs/roadmap.md#2단계-진행-상태)에 기록한다.
+검사는 임시 저장소와 loopback HTTP 서버에서 진행한다. 생성한 WAV·M4A로 업로드와 저장을 검사하고, 계약 기반 모의 InferSwap으로 순차 추론과 장애 복구를 검사한다. 실제 서비스·갤럭시 검증 범위는 [로드맵](docs/roadmap.md#3단계-진행-상태)에 기록한다.
 
 ## 설계 문서
 

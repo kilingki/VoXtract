@@ -43,3 +43,4 @@ progress { max-width: 100%; margin-left: .5rem; }
 #jobs li { border-top: 1px solid #d5dfeb; padding: .75rem 0; }
 #jobs strong { overflow-wrap: anywhere; }
 #jobs p { margin: .15rem 0; color: #34527a; }
+.job-actions { display: flex; flex-wrap: wrap; gap: .5rem; }

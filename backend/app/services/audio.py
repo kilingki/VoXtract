@@ -55,15 +55,17 @@ async def media_process(*args: str, timeout: int) -> AsyncIterator[asyncio.subpr
         raise InvalidAudio(f"{args[0]} timed out") from exc
 
 
-async def validate_audio(path: Path, suffix: str) -> float:
+def media_input(path: Path, suffix: str) -> tuple[str, ...]:
     if suffix == ".m4a":
         input_args = ("-f", "mov", "-enable_drefs", "0", "-use_absolute_path", "0")
-        codecs = {"aac"}
     else:
         input_args = ("-f", "wav")
-        codecs = WAV_CODECS
+    return (*input_args, "-protocol_whitelist", "file", "-i", str(path))
 
-    input_args += ("-protocol_whitelist", "file", "-i", str(path))
+
+async def validate_audio(path: Path, suffix: str) -> float:
+    input_args = media_input(path, suffix)
+    codecs = {"aac"} if suffix == ".m4a" else WAV_CODECS
     async with media_process(
         "ffprobe", "-v", "error", *input_args, "-show_entries",
         "stream=codec_type,codec_name,sample_rate,duration_ts,time_base",

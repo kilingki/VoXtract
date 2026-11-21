@@ -1,17 +1,22 @@
-"""HTTP entry point for the local upload and pending queue."""
+"""HTTP entry point for the local recording queue."""
 
 import errno
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 from urllib.parse import unquote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from starlette.requests import ClientDisconnect
 
 from backend.app.services.audio import AudioTooLong, InvalidAudio, MediaToolUnavailable
+from backend.app.services.inference import (
+    InferenceUnavailable, JobNotHeld, JobNotRunnable, Runner, public_job,
+)
 from backend.app.services.jobs import Jobs, UploadBusy
 from backend.app.storage.jobs import JobNotDeletable, JobNotFound, JobStore
 
@@ -26,8 +31,15 @@ JOB_ERRORS = {
     UploadBusy: (409, "upload_busy"),
     JobNotFound: (404, "job_not_found"),
     JobNotDeletable: (409, "job_not_deletable"),
+    JobNotRunnable: (409, "job_not_runnable"),
+    JobNotHeld: (409, "job_not_held"),
+    InferenceUnavailable: (503, "inference_unavailable"),
     ClientDisconnect: (400, "upload_disconnected"),
 }
+
+
+class IdleConfirmation(BaseModel):
+    runtime_idle_confirmed: Literal[True]
 
 
 async def job_error(_request: Request, exc: Exception) -> JSONResponse:
@@ -50,7 +62,9 @@ def create_app(data_dir: Path = ROOT_DIR / "data") -> FastAPI:
         store = JobStore(data_dir)
         with store.open():
             app.state.jobs = Jobs(store)
-            yield
+            app.state.runner = Runner(store, app.state.jobs.queue_lock)
+            async with app.state.runner.open():
+                yield
 
     app = FastAPI(title="VoXtract", version="0.1.0", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
@@ -86,12 +100,32 @@ def create_app(data_dir: Path = ROOT_DIR / "data") -> FastAPI:
     @app.get("/api/jobs")
     async def list_jobs(request: Request) -> JSONResponse:
         jobs = await request.app.state.jobs.list()
-        return JSONResponse({"jobs": jobs}, headers=PRIVATE_HEADERS)
+        return JSONResponse({
+            "jobs": [public_job(job) for job in jobs],
+            "inference_enabled": request.app.state.runner.enabled,
+            "inference_held": any(
+                job.get("external_pending") and job["status"] in {"failed", "interrupted"}
+                for job in jobs
+            ),
+        }, headers=PRIVATE_HEADERS)
 
     @app.get("/api/jobs/{job_id}")
     async def get_job(request: Request, job_id: str) -> JSONResponse:
         job = await request.app.state.jobs.get(job_id)
-        return JSONResponse(job, headers=PRIVATE_HEADERS)
+        return JSONResponse(public_job(job), headers=PRIVATE_HEADERS)
+
+    @app.post("/api/jobs/{job_id}/run", status_code=202)
+    async def run_job(request: Request, job_id: str) -> JSONResponse:
+        media_type = request.headers.get("content-type", "").partition(";")[0].strip().lower()
+        if media_type != "application/json":
+            raise HTTPException(415, "unsupported_request_type", headers=PRIVATE_HEADERS)
+        job = await request.app.state.runner.request(job_id)
+        return JSONResponse(public_job(job), status_code=202, headers=PRIVATE_HEADERS)
+
+    @app.post("/api/jobs/{job_id}/resolve")
+    async def resolve_job(request: Request, job_id: str, _confirmation: IdleConfirmation) -> JSONResponse:
+        job = await request.app.state.runner.resolve(job_id)
+        return JSONResponse(public_job(job), headers=PRIVATE_HEADERS)
 
     @app.delete("/api/jobs/{job_id}", status_code=204)
     async def delete_job(request: Request, job_id: str) -> Response:
