@@ -208,6 +208,12 @@ form.addEventListener("submit", async (event) => {
 
 uploadButton.disabled = false;
 refreshButton.addEventListener("click", loadJobs);
+window.addEventListener("online", () => {
+  if (!document.hidden) loadJobs();
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) loadJobs();
+});
 setInterval(() => {
   if (observing && !document.hidden && !refreshButton.disabled) loadJobs();
 }, 2500);

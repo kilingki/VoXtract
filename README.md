@@ -1,92 +1,95 @@
 # VoXtract
 
-음성·미디어 입력을 로컬 PC에서 전사하고 단어별 시간을 정렬하는 개인용 웹 애플리케이션이다. 초기 MVP는 갤럭시 녹음 업로드와 Qwen ASR → Qwen FA로 시작한다. 이후 다른 오디오·MP4 등 동영상 파일, YouTube 링크 입력, 작업별 ASR 런타임 선택으로 확장한다. 기존 InferSwap과 추론 런타임은 별도 저장소·프로세스로 유지한다.
+**English** · [한국어](README.ko.md)
 
-현재는 **녹음 업로드, 작업 관리, 선택한 작업의 순차 ASR→FA 실행**을 제공한다. 접수된 녹음은 앱을 재시작해도 유지된다. 완료한 작업에서 전사를 읽고 검색하며 원본 재생 위치를 이동할 수 있다. HTML·TXT·JSON으로 내려받을 수 있으며 스마트폰 외부 접속은 5단계 범위다.
+VoXtract is a self-hosted web app for transcribing recordings, including Samsung Galaxy Voice Recorder files. Upload a recording, search the transcript, and tap a timestamp to hear that part of the original audio.
 
-## 구조
+**The app interface is in Korean.**
 
-```text
-backend/app/
-  main.py             # HTTP 앱, 정적 화면, 상태 및 작업 API
-  __main__.py         # 단일 프로세스 실행
-  services/           # 업로드·오디오 준비·순차 추론 조정
-  integrations/       # InferSwap HTTP 및 Qwen 계약 어댑터
-  storage/            # 비공개 파일 기반 작업과 결과 저장
-frontend/             # 빌드 없는 HTML/CSS/JavaScript
-data/                 # 비공개 녹음 원본과 작업 메타데이터 (Git 제외)
-tests/                # 실제 HTTP 및 저장·복구 검사
-docs/                 # 설계·계획·결정 기록
-```
+## Features
 
-프로젝트 루트에서 실행하며 같은 서버가 프런트엔드를 제공한다.
+- Upload M4A (AAC) or WAV (PCM) recordings up to two hours long. Saved recordings and jobs persist across server restarts.
+- Transcribe audio with Qwen3-ASR, then use Qwen3-ForcedAligner to map words to the original recording.
+- Search the transcript, jump to timestamps, and follow highlighted text as the audio plays.
+- Export a standalone HTML transcript for offline reading, UTF-8 plain text, or versioned JSON with timing data.
+- Use VoXtract on a Galaxy phone over a private Tailscale network and install it from Chrome.
 
-## 개발 환경 및 실행
+## Quick start
 
-권장 환경은 로컬 PC의 Ubuntu/WSL2, Python 3.12, uv이다. 업로드 검증에는 서버의 PATH에서 `ffprobe`와 `ffmpeg`를 실행할 수 있어야 한다. Windows 네이티브 Python에서도 같은 실행 명령을 사용할 수 있으며, 이번 검증 환경은 WSL2이다.
+### Run the web app
+
+The tested setup uses Ubuntu on WSL2. You need Python 3.12 or later, `uv`, and FFmpeg. Make sure both `ffmpeg` and `ffprobe` are on the server's PATH.
 
 ```sh
+git clone https://github.com/kilingki/VoXtract.git
+cd VoXtract
 uv sync --locked
 uv run --locked python -m backend.app
 ```
 
-브라우저에서 [http://127.0.0.1:8000](http://127.0.0.1:8000)을 연다. 종료는 Ctrl+C. 기본 바인딩은 PC 로컬 접속용이다. 스마트폰 연결과 HTTPS는 후속 단계다.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to try uploading a recording. The app binds to loopback by default and stores recordings, job metadata, and results under `data/jobs/`. It keeps 1 GiB of disk space in reserve.
 
-PC에 있는 M4A(AAC) 또는 WAV(PCM) 녹음을 골라 업로드한다. 오디오 길이는 0초 초과·2시간 이하여야 한다. 접수한 파일과 작업 정보는 `data/jobs/`에 저장한다. 파일 크기와 저장 총량의 고정 상한 없이 디스크 여유 1 GiB를 확보한다.
+### Transcribe a recording
 
-환경변수는 선택 사항이며 기본값으로 실행할 수 있다. .env 자동 로딩은 하지 않는다. WSL/bash에서 직접 작성한 파일을 명시적으로 읽는다.
+**Transcription requires all three companion services to be running**, with both Qwen runtimes registered in InferSwap. You can open the web app and upload recordings before setting up inference.
 
-```sh
-cp .env.example .env
-set -a
-. ./.env
-set +a
-uv run --locked python -m backend.app
-```
+| Service | Role |
+| --- | --- |
+| [InferSwap](https://github.com/kilingki/InferSwap) | Routes inference requests and manages GPU model loading and unloading. |
+| [Qwen3-ASR runtime](https://github.com/kilingki/qwen-asr-vllm-docker-config) | Transcribes the recording. |
+| [Qwen3-ForcedAligner runtime](https://github.com/kilingki/qwen-fa-docker-config) | Aligns the transcript to the original audio. |
 
-Windows PowerShell에서는 직접 지정한다.
-
-```powershell
-$env:VOXTRACT_HOST = "127.0.0.1"
-$env:VOXTRACT_PORT = "8000"
-uv run --locked python -m backend.app
-```
-
-uv.lock은 재현 가능한 설치를 위해 보관한다. FastAPI와 Uvicorn을 사용하며, InferSwap 연결의 취소와 응답 처리를 위해 Uvicorn이 이미 설치하는 h11을 직접 사용한다.
-
-### 저장된 녹음 전사
-
-InferSwap과 InferSwap에 등록된 ASR·FA 런타임을 준비한 뒤, VoXtract 서버를 실행한 WSL에서 실제 InferSwap 주소를 지정한다. 아래 주소는 조사한 로컬 설정 기준이다. 기존 VoXtract가 떠 있으면 종료하고 같은 프로젝트 루트에서 다시 실행한다.
+Follow the setup instructions in each companion repository. If VoXtract is already running, stop it, then restart it with the InferSwap URL reachable from the machine or WSL instance running VoXtract. Replace the example address if your gateway listens elsewhere.
 
 ```sh
 VOXTRACT_INFERSWAP_URL=http://127.0.0.1:8095 uv run --locked python -m backend.app
 ```
 
-작업 목록에서 원하는 녹음의 **전사 시작**을 누른다. 기존 M4A도 그대로 선택할 수 있다. 등록 모델 ID와 ASR served name이 다르면 [.env.example](.env.example)의 설정으로 지정한다. 작업 목록은 준비·전사·정렬·완료 상태를 표시한다. 검증된 내부 결과는 `data/jobs/<id>/inference/result.json`에 저장된다. 외부 실행 종료가 불명확해 보류된 경우에는 [복구 절차](docs/architecture.md#외부-실행-보류-해제)를 따른다.
+The default InferSwap model IDs are `qwen-asr` and `qwen-fa`, with `qwen3-asr` as the ASR served name. If your registration differs, see the [example environment settings](.env.example).
 
-### 결과 확인과 다운로드
+1. Upload an M4A or WAV recording, or choose an existing recording from the job list.
+2. Select **전사 시작** (Start transcription). The job list shows preparation, transcription, and alignment progress.
+3. Select **결과 보기** (View results) to search, play, or download the transcript.
 
-작업 목록에서 **결과 보기**를 연다. 전사 구간의 시간 버튼으로 원본을 탐색할 수 있고, 재생 위치에 맞는 구간과 단어가 강조된다. 검색은 화면에 표시된 구간을 필터링한다. **ASR 원문**을 펼치면 저장된 전사 본문을 읽을 수 있다.
+### Tested setup
 
-**HTML**은 스타일을 담은 단일 파일로 오프라인에서 읽을 수 있다. **TXT**는 UTF-8 전사 원문, **JSON**은 전사·정렬·시간 단위를 담은 버전 있는 결과다. 오디오 재생과 동기 강조는 앱 화면에서 제공한다.
+The end-to-end workflow was tested with a roughly 52-minute Korean recording from a Galaxy phone. The reference host runs Windows with Ubuntu on WSL2, an Intel Core i5-12600K, 64 GB of RAM, and an NVIDIA GeForce RTX 3090 with 24 GB of VRAM.
 
-## 검증
+## Use it from a Galaxy phone
+
+1. Connect the Windows host and the phone to the same private Tailscale network. Check that `http://127.0.0.1:8000/api/health` responds on Windows.
+2. Run the following in an elevated Windows terminal. If prompted, enable HTTPS for your tailnet. The HTTPS URL shown by `serve status` is subject to your tailnet's access rules. See the [Tailscale Serve docs](https://tailscale.com/docs/features/tailscale-serve).
+
+   ```powershell
+   tailscale serve --bg http://127.0.0.1:8000
+   tailscale serve status
+   ```
+
+3. Open the HTTPS URL in Chrome on the phone. Use **Add to Home screen → Install** to launch VoXtract from your home screen.
+
+Keep the host and VoXtract running to upload recordings, browse saved jobs, or play audio. You can read a downloaded HTML transcript offline.
+
+## Development
+
+Configure VoXtract through environment variables. To use a `.env` file in Bash, copy [.env.example](.env.example), edit it, then load it explicitly before starting the app.
+
+```sh
+set -a
+. ./.env
+set +a
+```
+
+Run the checks from the repository root.
 
 ```sh
 uv run --locked python -m unittest discover -s tests -v
 uv run --locked python -m compileall -q backend tests
 ```
 
-검사는 임시 저장소와 loopback HTTP 서버에서 진행한다. 생성한 WAV·M4A로 업로드와 저장을 검사하고, 계약 기반 모의 InferSwap으로 순차 추론과 장애 복구를 검사한다. 실제 서비스·갤럭시 검증 범위는 [로드맵](docs/roadmap.md#3단계-진행-상태)에 기록한다.
+The tests use temporary storage, generated audio, and a mock InferSwap service.
 
-## 설계 문서
+- [Development guidelines](AGENTS.md)
 
-- [아키텍처](docs/architecture.md): 책임·흐름·실패와 복구
-- [로드맵](docs/roadmap.md): 구현 순서와 완료 조건
-- [결정 기록](docs/decisions.md): 기술 선택과 미결정 항목
-- [연동 계약 기록](docs/integration-contracts.md): 1단계에서 조사한 InferSwap·ASR·FA 계약, 근거 버전과 미검증 항목
-- [개발 규칙](AGENTS.md): 사람과 AI Agent의 작업 기준
+## License
 
-## 라이선스
-
-[MIT License](LICENSE) · Copyright (c) 2026 kilingki
+[MIT](LICENSE) · Copyright (c) 2026 kilingki

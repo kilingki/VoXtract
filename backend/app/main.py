@@ -86,6 +86,10 @@ def create_app(data_dir: Path = ROOT_DIR / "data") -> FastAPI:
     def index() -> FileResponse:
         return FileResponse(FRONTEND_DIR / "index.html")
 
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    def manifest() -> FileResponse:
+        return FileResponse(FRONTEND_DIR / "manifest.webmanifest", media_type="application/manifest+json")
+
     @app.post("/api/jobs", status_code=201)
     async def upload(request: Request) -> JSONResponse:
         if request.headers.get("content-type") != "application/octet-stream":

@@ -1,13 +1,21 @@
-.venv/
+# Private recordings, transcripts, and local working notes
+/data/*
+!/data/.gitkeep
+/local/
+
+# Environment configuration
+.env
+.env.*
+!.env.example
+
+# Python environments and caches
+/.venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
-.env
-.env.*
-!.env.example
-data/*
-!data/.gitkeep
+
+# Logs and OS metadata
 *.log
 .DS_Store
 Thumbs.db

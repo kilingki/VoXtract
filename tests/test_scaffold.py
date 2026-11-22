@@ -2,6 +2,7 @@
 
 import json
 import socket
+import struct
 import threading
 import time
 import unittest
@@ -67,6 +68,24 @@ class ScaffoldTests(unittest.TestCase):
         with self.assertRaises(HTTPError) as error:
             urlopen(self.base_url + "/data/.gitkeep", timeout=3)
         self.assertEqual(error.exception.code, 404)
+
+    def test_pwa_manifest_and_icons(self) -> None:
+        with urlopen(self.base_url + "/", timeout=3) as response:
+            self.assertIn('rel="manifest" href="/manifest.webmanifest"', response.read().decode())
+        with urlopen(self.base_url + "/manifest.webmanifest", timeout=3) as response:
+            self.assertEqual(response.headers.get_content_type(), "application/manifest+json")
+            manifest = json.load(response)
+        self.assertEqual(manifest["scope"], "/")
+        self.assertEqual(manifest["start_url"], "/")
+        self.assertEqual(manifest["display"], "standalone")
+        self.assertEqual({icon["sizes"] for icon in manifest["icons"]}, {"192x192", "512x512"})
+        for icon in manifest["icons"]:
+            with self.subTest(icon=icon["src"]), urlopen(self.base_url + icon["src"], timeout=3) as response:
+                self.assertEqual(response.headers.get_content_type(), "image/png")
+                header = response.read(24)
+                self.assertEqual(header[:8], b"\x89PNG\r\n\x1a\n")
+                dimensions = struct.unpack(">II", header[16:24])
+                self.assertEqual("x".join(map(str, dimensions)), icon["sizes"])
 
 
 if __name__ == "__main__":
